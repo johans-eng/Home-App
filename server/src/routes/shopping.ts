@@ -1,134 +1,129 @@
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import db, { ShoppingItem, User } from '../db/database';
-import { logActivity, broadcast } from '../socket/socketManager';
+import db, { ShoppingItem, getUserName, now } from '../db/database.js';
+import { logActivity, broadcast } from '../socket/socketManager.js';
 
 const router = Router();
 
 // Get all shopping items (with user names)
-router.get('/', (req, res) => {
-  const items = db.prepare(`
-    SELECT s.*, u.name as user_name 
-    FROM shopping_items s 
-    JOIN users u ON s.user_id = u.id 
-    ORDER BY s.checked, s.created_at DESC
-  `).all() as ShoppingItem[];
+router.get('/', async (req, res) => {
+  await db.read();
+  const items = db.data!.shopping_items
+    .map(s => ({ ...s, user_name: getUserName(s.user_id) }))
+    .sort((a, b) => {
+      if (a.checked !== b.checked) return a.checked - b.checked;
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
   res.json(items);
 });
 
 // Get unchecked items
-router.get('/pending', (req, res) => {
-  const items = db.prepare(`
-    SELECT s.*, u.name as user_name 
-    FROM shopping_items s 
-    JOIN users u ON s.user_id = u.id 
-    WHERE s.checked = 0
-    ORDER BY s.created_at DESC
-  `).all() as ShoppingItem[];
+router.get('/pending', async (req, res) => {
+  await db.read();
+  const items = db.data!.shopping_items
+    .filter(s => !s.checked)
+    .map(s => ({ ...s, user_name: getUserName(s.user_id) }))
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   res.json(items);
 });
 
 // Create shopping item
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const { user_id, name, quantity } = req.body;
   
   if (!user_id || !name) {
     return res.status(400).json({ error: 'user_id and name are required' });
   }
 
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(user_id) as User | undefined;
+  await db.read();
+  const user = db.data!.users.find(u => u.id === user_id);
   if (!user) {
     return res.status(404).json({ error: 'User not found' });
   }
 
-  const id = uuidv4();
-  db.prepare('INSERT INTO shopping_items (id, user_id, name, quantity) VALUES (?, ?, ?, ?)')
-    .run(id, user_id, name, quantity || 1);
+  const item: ShoppingItem = {
+    id: uuidv4(),
+    user_id,
+    name,
+    quantity: quantity || 1,
+    checked: 0,
+    created_at: now()
+  };
+
+  db.data!.shopping_items.push(item);
+  await db.write();
   
-  const item = db.prepare(`
-    SELECT s.*, u.name as user_name 
-    FROM shopping_items s 
-    JOIN users u ON s.user_id = u.id 
-    WHERE s.id = ?
-  `).get(id) as ShoppingItem;
-  
+  const withUserName = { ...item, user_name: user.name };
   logActivity(user_id, 'shopping_added', `${user.name} added to shopping: ${name}`);
-  broadcast('shopping_created', item);
+  broadcast('shopping_created', withUserName);
   
-  res.status(201).json(item);
+  res.status(201).json(withUserName);
 });
 
 // Toggle checked status
-router.put('/:id/toggle', (req, res) => {
-  const item = db.prepare('SELECT * FROM shopping_items WHERE id = ?').get(req.params.id) as ShoppingItem | undefined;
+router.put('/:id/toggle', async (req, res) => {
+  await db.read();
   
-  if (!item) {
+  const itemIndex = db.data!.shopping_items.findIndex(s => s.id === req.params.id);
+  if (itemIndex === -1) {
     return res.status(404).json({ error: 'Shopping item not found' });
   }
 
-  const newChecked = item.checked ? 0 : 1;
+  const item = db.data!.shopping_items[itemIndex];
+  item.checked = item.checked ? 0 : 1;
   
-  db.prepare('UPDATE shopping_items SET checked = ? WHERE id = ?')
-    .run(newChecked, req.params.id);
+  await db.write();
   
-  const updated = db.prepare(`
-    SELECT s.*, u.name as user_name 
-    FROM shopping_items s 
-    JOIN users u ON s.user_id = u.id 
-    WHERE s.id = ?
-  `).get(req.params.id) as ShoppingItem;
+  const withUserName = { ...item, user_name: getUserName(item.user_id) };
+  broadcast('shopping_updated', withUserName);
   
-  broadcast('shopping_updated', updated);
-  
-  res.json(updated);
+  res.json(withUserName);
 });
 
 // Update shopping item
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
   const { name, quantity, checked } = req.body;
-  const item = db.prepare('SELECT * FROM shopping_items WHERE id = ?').get(req.params.id) as ShoppingItem | undefined;
+  await db.read();
   
-  if (!item) {
+  const itemIndex = db.data!.shopping_items.findIndex(s => s.id === req.params.id);
+  if (itemIndex === -1) {
     return res.status(404).json({ error: 'Shopping item not found' });
   }
 
-  db.prepare('UPDATE shopping_items SET name = ?, quantity = ?, checked = ? WHERE id = ?')
-    .run(
-      name || item.name,
-      quantity !== undefined ? quantity : item.quantity,
-      checked !== undefined ? (checked ? 1 : 0) : item.checked,
-      req.params.id
-    );
+  const item = db.data!.shopping_items[itemIndex];
+  if (name) item.name = name;
+  if (quantity !== undefined) item.quantity = quantity;
+  if (checked !== undefined) item.checked = checked ? 1 : 0;
   
-  const updated = db.prepare(`
-    SELECT s.*, u.name as user_name 
-    FROM shopping_items s 
-    JOIN users u ON s.user_id = u.id 
-    WHERE s.id = ?
-  `).get(req.params.id) as ShoppingItem;
+  await db.write();
   
-  broadcast('shopping_updated', updated);
+  const withUserName = { ...item, user_name: getUserName(item.user_id) };
+  broadcast('shopping_updated', withUserName);
   
-  res.json(updated);
+  res.json(withUserName);
 });
 
 // Delete shopping item
-router.delete('/:id', (req, res) => {
-  const item = db.prepare('SELECT * FROM shopping_items WHERE id = ?').get(req.params.id) as ShoppingItem | undefined;
+router.delete('/:id', async (req, res) => {
+  await db.read();
   
-  if (!item) {
+  const itemIndex = db.data!.shopping_items.findIndex(s => s.id === req.params.id);
+  if (itemIndex === -1) {
     return res.status(404).json({ error: 'Shopping item not found' });
   }
 
-  db.prepare('DELETE FROM shopping_items WHERE id = ?').run(req.params.id);
+  db.data!.shopping_items.splice(itemIndex, 1);
+  await db.write();
   broadcast('shopping_deleted', { id: req.params.id });
   
   res.json({ success: true });
 });
 
 // Clear all checked items
-router.delete('/clear/checked', (req, res) => {
-  db.prepare('DELETE FROM shopping_items WHERE checked = 1').run();
+router.delete('/clear/checked', async (req, res) => {
+  await db.read();
+  db.data!.shopping_items = db.data!.shopping_items.filter(s => !s.checked);
+  await db.write();
   broadcast('shopping_cleared', {});
   res.json({ success: true });
 });

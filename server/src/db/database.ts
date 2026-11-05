@@ -1,64 +1,10 @@
-import Database from 'better-sqlite3';
-import path from 'path';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { Low } from 'lowdb';
+import { JSONFile } from 'lowdb/node';
+import { mkdirSync, existsSync } from 'fs';
 
-const dbPath = path.join(__dirname, '../../data/home-app.db');
-const db = new Database(dbPath);
-
-// Initialize database tables
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    avatar TEXT,
-    is_home INTEGER DEFAULT 0,
-    last_status_change TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS appointments (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    title TEXT NOT NULL,
-    date TEXT NOT NULL,
-    time TEXT NOT NULL,
-    notes TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS todos (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    title TEXT NOT NULL,
-    completed INTEGER DEFAULT 0,
-    created_at TEXT DEFAULT (datetime('now')),
-    completed_at TEXT,
-    FOREIGN KEY (user_id) REFERENCES users(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS shopping_items (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    quantity INTEGER DEFAULT 1,
-    checked INTEGER DEFAULT 0,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS activity_log (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    action TEXT NOT NULL,
-    details TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id)
-  );
-`);
-
-export default db;
-
-// Helper types
+// Types
 export interface User {
   id: string;
   name: string;
@@ -106,4 +52,46 @@ export interface ActivityLog {
   action: string;
   details?: string;
   created_at: string;
+}
+
+interface DbData {
+  users: User[];
+  appointments: Appointment[];
+  todos: Todo[];
+  shopping_items: ShoppingItem[];
+  activity_log: ActivityLog[];
+}
+
+const defaultData: DbData = {
+  users: [],
+  appointments: [],
+  todos: [],
+  shopping_items: [],
+  activity_log: []
+};
+
+// Ensure data directory exists
+const dataDir = join(process.cwd(), 'data');
+if (!existsSync(dataDir)) {
+  mkdirSync(dataDir, { recursive: true });
+}
+
+const dbPath = join(dataDir, 'home-app.json');
+const adapter = new JSONFile<DbData>(dbPath);
+const db = new Low<DbData>(adapter, defaultData);
+
+// Initialize database
+await db.read();
+db.data ||= defaultData;
+await db.write();
+
+export default db;
+
+// Helper functions
+export function getUserName(userId: string): string | undefined {
+  return db.data?.users.find(u => u.id === userId)?.name;
+}
+
+export function now(): string {
+  return new Date().toISOString();
 }

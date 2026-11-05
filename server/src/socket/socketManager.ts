@@ -1,43 +1,39 @@
 import { Server as SocketServer, Socket } from 'socket.io';
 import { v4 as uuidv4 } from 'uuid';
-import db from '../db/database';
+import db, { getUserName, now } from '../db/database.js';
 
 let io: SocketServer | null = null;
 
 export function initializeSocket(socketServer: SocketServer) {
   io = socketServer;
 
-  io.on('connection', (socket: Socket) => {
+  io.on('connection', async (socket: Socket) => {
     console.log(`Client connected: ${socket.id}`);
 
     // Send current state to new client
+    await db.read();
+    
     socket.emit('initial_state', {
-      users: db.prepare('SELECT * FROM users ORDER BY name').all(),
-      appointments: db.prepare(`
-        SELECT a.*, u.name as user_name 
-        FROM appointments a 
-        JOIN users u ON a.user_id = u.id 
-        ORDER BY a.date, a.time
-      `).all(),
-      todos: db.prepare(`
-        SELECT t.*, u.name as user_name 
-        FROM todos t 
-        JOIN users u ON t.user_id = u.id 
-        ORDER BY t.completed, t.created_at DESC
-      `).all(),
-      shopping: db.prepare(`
-        SELECT s.*, u.name as user_name 
-        FROM shopping_items s 
-        JOIN users u ON s.user_id = u.id 
-        ORDER BY s.checked, s.created_at DESC
-      `).all(),
-      activity: db.prepare(`
-        SELECT a.*, u.name as user_name 
-        FROM activity_log a 
-        JOIN users u ON a.user_id = u.id 
-        ORDER BY a.created_at DESC 
-        LIMIT 50
-      `).all()
+      users: db.data!.users.sort((a, b) => a.name.localeCompare(b.name)),
+      appointments: db.data!.appointments
+        .map(a => ({ ...a, user_name: getUserName(a.user_id) }))
+        .sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`)),
+      todos: db.data!.todos
+        .map(t => ({ ...t, user_name: getUserName(t.user_id) }))
+        .sort((a, b) => {
+          if (a.completed !== b.completed) return a.completed - b.completed;
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        }),
+      shopping: db.data!.shopping_items
+        .map(s => ({ ...s, user_name: getUserName(s.user_id) }))
+        .sort((a, b) => {
+          if (a.checked !== b.checked) return a.checked - b.checked;
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        }),
+      activity: db.data!.activity_log
+        .map(a => ({ ...a, user_name: getUserName(a.user_id) }))
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 50)
     });
 
     socket.on('disconnect', () => {
@@ -52,17 +48,18 @@ export function broadcast(event: string, data: any) {
   }
 }
 
-export function logActivity(userId: string, action: string, details: string) {
-  const id = uuidv4();
-  db.prepare('INSERT INTO activity_log (id, user_id, action, details) VALUES (?, ?, ?, ?)')
-    .run(id, userId, action, details);
+export async function logActivity(userId: string, action: string, details: string) {
+  const activity = {
+    id: uuidv4(),
+    user_id: userId,
+    action,
+    details,
+    created_at: now()
+  };
   
-  const activity = db.prepare(`
-    SELECT a.*, u.name as user_name 
-    FROM activity_log a 
-    JOIN users u ON a.user_id = u.id 
-    WHERE a.id = ?
-  `).get(id);
+  db.data!.activity_log.push(activity);
+  await db.write();
   
-  broadcast('activity_created', activity);
+  const withUserName = { ...activity, user_name: getUserName(userId) };
+  broadcast('activity_created', withUserName);
 }

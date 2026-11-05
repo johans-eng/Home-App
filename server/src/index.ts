@@ -4,20 +4,18 @@ import http from 'http';
 import { Server as SocketServer } from 'socket.io';
 import path from 'path';
 import fs from 'fs';
+import { fileURLToPath } from 'url';
 
-// Ensure data directory exists
-const dataDir = path.join(__dirname, '../data');
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
-}
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Import routes
-import usersRouter from './routes/users';
-import appointmentsRouter from './routes/appointments';
-import todosRouter from './routes/todos';
-import shoppingRouter from './routes/shopping';
-import activityRouter from './routes/activity';
-import { initializeSocket } from './socket/socketManager';
+import usersRouter from './routes/users.js';
+import appointmentsRouter from './routes/appointments.js';
+import todosRouter from './routes/todos.js';
+import shoppingRouter from './routes/shopping.js';
+import activityRouter from './routes/activity.js';
+import { initializeSocket } from './socket/socketManager.js';
 
 const app = express();
 const server = http.createServer(app);
