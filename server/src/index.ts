@@ -4,10 +4,6 @@ import http from 'http';
 import { Server as SocketServer } from 'socket.io';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // Import database and initialize
 import { initDb } from './db/database.js';
@@ -42,7 +38,11 @@ async function main() {
   app.use(express.json());
 
   // Serve static files from web client build
-  const clientBuildPath = path.join(__dirname, '../../web-client/dist');
+  // Use process.cwd() since we run from server folder
+  const clientBuildPath = path.join(process.cwd(), '../web-client/dist');
+  console.log('Looking for client build at:', clientBuildPath);
+  console.log('Client build exists:', fs.existsSync(clientBuildPath));
+  
   if (fs.existsSync(clientBuildPath)) {
     app.use(express.static(clientBuildPath));
   }
@@ -59,12 +59,13 @@ async function main() {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
-  // Serve web client for any non-API routes
+  // Serve web client for any non-API routes (SPA fallback)
   app.get('*', (req, res) => {
-    if (fs.existsSync(clientBuildPath)) {
-      res.sendFile(path.join(clientBuildPath, 'index.html'));
+    const indexPath = path.join(clientBuildPath, 'index.html');
+    if (fs.existsSync(indexPath)) {
+      res.sendFile(indexPath);
     } else {
-      res.json({ message: 'Home App Server is running. Build web client to serve UI.' });
+      res.json({ message: 'Home App Server is running. Build web client to serve UI.', buildPath: clientBuildPath });
     }
   });
 
