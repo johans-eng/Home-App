@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+*.apk
+*.aab
+
+# Server data
+server/data/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Android
+android-tablet/.gradle/
+android-tablet/app/build/
+android-tablet/local.properties
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+Thumbs.db
