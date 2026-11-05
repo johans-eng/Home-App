@@ -1,4 +1,4 @@
-import { Home, LogOut, Calendar, CheckSquare, ShoppingCart, Activity } from 'lucide-react';
+import { Home, LogOut } from 'lucide-react';
 import { AppState, User } from '../../types';
 import WhoIsHome from './WhoIsHome';
 import TodayAppointments from './TodayAppointments';
