@@ -1,5 +1,4 @@
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { join } from 'path';
 import { Low } from 'lowdb';
 import { JSONFile } from 'lowdb/node';
 import { mkdirSync, existsSync } from 'fs';
@@ -80,10 +79,15 @@ const dbPath = join(dataDir, 'home-app.json');
 const adapter = new JSONFile<DbData>(dbPath);
 const db = new Low<DbData>(adapter, defaultData);
 
-// Initialize database
-await db.read();
-db.data ||= defaultData;
-await db.write();
+// Initialize function (call this before using db)
+let initialized = false;
+export async function initDb() {
+  if (initialized) return;
+  await db.read();
+  db.data ||= defaultData;
+  await db.write();
+  initialized = true;
+}
 
 export default db;
 
